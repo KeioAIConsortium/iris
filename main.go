@@ -28,12 +28,14 @@ func main() {
 	if err != nil {
 		log.Fatalln("Error getting device count:", err.Error())
 	}
+
+	var devices []nvml.Device
 	for i := uint(0); i < count; i++ {
 		device, err := nvml.NewDevice(i)
 		if err != nil {
 			log.Fatalln("NVML error:", err.Error())
 		}
-		log.Println(device.PCI.BusID)
+		devices = append(devices, *device)
 	}
 
 	c, err := lxd.ConnectLXDUnix("", nil)
