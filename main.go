@@ -129,6 +129,95 @@ func (s *State) releaseGpu(c lxd.InstanceServer, containerName string) error {
 	return nil
 }
 
+func initState(devices []nvml.Device) State {
+	containers := make([]string, len(devices), len(devices))
+	for i := 0; i < len(devices); i++ {
+		containers[i] = ""
+	}
+
+	return State{
+		devices:    devices,
+		containers: containers,
+		lock:       sync.RWMutex{},
+	}
+}
+
+type ClusterState struct {
+	locationLookup map[string]string
+	lock           sync.RWMutex
+}
+
+func initClusterState(c lxd.InstanceServer) ClusterState {
+	// TODO: data race between lifecycle handler and container check
+	containers, err := c.GetContainers()
+	if err != nil {
+		log.Fatalln("LXD error:", err.Error())
+	}
+
+	locationLookup := map[string]string{}
+	for _, container := range containers {
+		locationLookup[container.Name] = container.Location
+	}
+
+	return ClusterState{
+		locationLookup: locationLookup,
+		lock:           sync.RWMutex{},
+	}
+}
+
+func (cs *ClusterState) query(containerName string) (string, error) {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+
+	server, ok := cs.locationLookup[containerName]
+	if !ok {
+		return "", fmt.Errorf("Container %s not in lookup table!", containerName)
+	}
+
+	return server, nil
+}
+
+func (cs *ClusterState) add(containerName string, server string) error {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+
+	s, ok := cs.locationLookup[containerName]
+	if ok {
+		return fmt.Errorf("Container %s already exists in lookup table at %s!", containerName, s)
+	}
+
+	cs.locationLookup[containerName] = server
+	return nil
+}
+
+func (cs *ClusterState) remove(containerName string, server string) error {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+
+	s, ok := cs.locationLookup[containerName]
+	if !ok {
+		return fmt.Errorf("Container %s not in lookup table!", containerName)
+	}
+	if s != server {
+		return fmt.Errorf("Lookup table shows container %s at %s, but expected %s", containerName, s, server)
+	}
+
+	delete(cs.locationLookup, containerName)
+	return nil
+}
+
+func (cs *ClusterState) logManagedContainers(server string) {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+
+	log.Println("Currently managed containers:")
+	for k, v := range cs.locationLookup {
+		if v == server {
+			log.Println("-", k)
+		}
+	}
+}
+
 func main() {
 	log.Println("Initializing NVML...")
 	err := nvml.Init()
@@ -158,21 +247,24 @@ func main() {
 		log.Fatalln("LXD error:", err.Error())
 	}
 
+	clusterInfo, _, err := c.GetCluster()
+	if err != nil {
+		log.Fatalln("LXD error:", err.Error())
+	}
+	if clusterInfo.Enabled {
+		log.Println("LXD is running in cluster mode")
+	} else {
+		log.Println("LXD is running in standalone mode")
+	}
+
 	e, err := c.GetEvents()
 	if err != nil {
 		log.Fatalln("LXD error:", err.Error())
 	}
 
-	containers := make([]string, len(devices), len(devices))
-	for i := 0; i < len(devices); i++ {
-		containers[i] = ""
-	}
-
-	state := State{
-		devices:    devices,
-		containers: containers,
-		lock:       sync.RWMutex{},
-	}
+	//state := initState(devices)
+	clusterState := initClusterState(c)
+	clusterState.logManagedContainers(clusterInfo.ServerName)
 
 	e.AddHandler([]string{"lifecycle"}, func(e api.Event) {
 		event := &api.EventLifecycle{}
@@ -185,12 +277,42 @@ func main() {
 		containerName := components[len(components)-1]
 
 		log.Printf("%s: %s\n", containerName, event.Action)
+		log.Println(jsonifyPretty(event))
+
+		switch event.Action {
+		case "container-created":
+			err := clusterState.add(containerName, clusterInfo.ServerName)
+			if err != nil {
+				log.Fatalln("error:", err.Error())
+			}
+			clusterState.logManagedContainers(clusterInfo.ServerName)
+			return
+		case "container-deleted":
+			err := clusterState.remove(containerName, clusterInfo.ServerName)
+			if err != nil {
+				log.Fatalln("error:", err.Error())
+			}
+			clusterState.logManagedContainers(clusterInfo.ServerName)
+			return
+		default:
+		}
+
+		server, err := clusterState.query(containerName)
+		if err != nil {
+			log.Fatalln("error:", err.Error())
+		}
+		if server != clusterInfo.ServerName {
+			log.Printf("Container %s belongs to %s, ignoring\n", containerName, server)
+			return
+		}
 
 		switch event.Action {
 		case "container-started":
-			state.requestGpu(c, containerName)
+			log.Println("Attaching GPU to container")
+			//state.requestGpu(c, containerName)
 		case "container-shutdown":
-			state.releaseGpu(c, containerName)
+			log.Println("Releasing GPU from container")
+			//state.releaseGpu(c, containerName)
 		default:
 			return
 		}
