@@ -190,6 +190,24 @@ func (cs *ClusterState) add(containerName string, server string) error {
 	return nil
 }
 
+func (cs *ClusterState) rename(oldContainerName string, newContainerName string) error {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+
+	server, ok := cs.locationLookup[oldContainerName]
+	if !ok {
+		return fmt.Errorf("Container %s not in lookup table!", oldContainerName)
+	}
+
+	if s, ok := cs.locationLookup[newContainerName]; ok {
+		return fmt.Errorf("Container %s already exists in lookup table at %s!", newContainerName, s)
+	}
+
+	cs.locationLookup[newContainerName] = server
+	delete(cs.locationLookup, oldContainerName)
+	return nil
+}
+
 func (cs *ClusterState) remove(containerName string, server string) error {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
@@ -289,6 +307,17 @@ func main() {
 			return
 		case "container-deleted":
 			err := clusterState.remove(containerName, clusterInfo.ServerName)
+			if err != nil {
+				log.Fatalln("error:", err.Error())
+			}
+			clusterState.logManagedContainers(clusterInfo.ServerName)
+			return
+		case "container-renamed":
+			newContainerName, ok := event.Context["new_name"].(string)
+			if !ok {
+				log.Fatalln("\"new_name\" key in event.Context not found")
+			}
+			err := clusterState.rename(containerName, newContainerName)
 			if err != nil {
 				log.Fatalln("error:", err.Error())
 			}
