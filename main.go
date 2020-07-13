@@ -129,15 +129,45 @@ func (s *State) releaseGpu(c lxd.InstanceServer, containerName string) error {
 	return nil
 }
 
-func initState(devices []nvml.Device) State {
-	containers := make([]string, len(devices), len(devices))
+func initState(containers []api.Container, devices []nvml.Device) State {
+	containersState := make([]string, len(devices), len(devices))
 	for i := 0; i < len(devices); i++ {
-		containers[i] = ""
+		containersState[i] = ""
+	}
+
+	for i, container := range containers {
+		for _, device := range container.ExpandedDevices {
+			deviceType, ok := device["type"]
+			if !ok {
+				log.Fatalf("%s: expected \"type\" for device: %s", container.Name, jsonifyPretty(device))
+			}
+			if deviceType != "gpu" {
+				continue
+			}
+
+			pciAddress, ok := device["pci"]
+			if !ok {
+				log.Fatalf("%s: found invalid gpu device (no pci address specified): %s", container.Name, jsonifyPretty(device))
+			}
+
+			found := false
+			for _, device := range devices {
+				if pciAddress == getPciAddress(device) {
+					found = true
+				}
+			}
+			if !found {
+				log.Fatalf("%s: attached gpu not found: %s", container.Name, jsonifyPretty(device))
+			}
+			containersState[i] = container.Name
+
+			log.Println(container.Name, jsonifyPretty(device))
+		}
 	}
 
 	return State{
 		devices:    devices,
-		containers: containers,
+		containers: containersState,
 		lock:       sync.RWMutex{},
 	}
 }
@@ -147,13 +177,7 @@ type ClusterState struct {
 	lock           sync.RWMutex
 }
 
-func initClusterState(c lxd.InstanceServer) ClusterState {
-	// TODO: data race between lifecycle handler and container check
-	containers, err := c.GetContainers()
-	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
-	}
-
+func initClusterState(containers []api.Container) ClusterState {
 	locationLookup := map[string]string{}
 	for _, container := range containers {
 		locationLookup[container.Name] = container.Location
@@ -224,16 +248,42 @@ func (cs *ClusterState) remove(containerName string, server string) error {
 	return nil
 }
 
-func (cs *ClusterState) logManagedContainers(server string) {
+func (cs *ClusterState) getManagedContainers(server string) []string {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
 
-	log.Println("Currently managed containers:")
+	var managedContainers []string
 	for k, v := range cs.locationLookup {
 		if v == server {
-			log.Println("-", k)
+			managedContainers = append(managedContainers, k)
 		}
 	}
+	return managedContainers
+}
+
+func (cs *ClusterState) logManagedContainers(server string) {
+	log.Println("Currently managed containers:")
+	for _, containerName := range cs.getManagedContainers(server) {
+		log.Println("-", containerName)
+	}
+}
+
+func stringSliceContains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}
+
+func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []api.Container) {
+	for _, s := range ss {
+		if test(s) {
+			ret = append(ret, s)
+		}
+	}
+	return
 }
 
 func main() {
@@ -280,9 +330,22 @@ func main() {
 		log.Fatalln("LXD error:", err.Error())
 	}
 
-	//state := initState(devices)
-	clusterState := initClusterState(c)
+	// TODO: data race between lifecycle handler and container check
+	containers, err := c.GetContainers()
+	if err != nil {
+		log.Fatalln("LXD error:", err.Error())
+	}
+
+	clusterState := initClusterState(containers)
 	clusterState.logManagedContainers(clusterInfo.ServerName)
+	managedContainerNames :=
+		clusterState.getManagedContainers(clusterInfo.ServerName)
+	managedContainers :=
+		filterContainers(containers, func(container api.Container) bool {
+			return stringSliceContains(managedContainerNames, container.Name)
+		})
+	//state := initState(containers, devices)
+	initState(managedContainers, devices)
 
 	e.AddHandler([]string{"lifecycle"}, func(e api.Event) {
 		event := &api.EventLifecycle{}
