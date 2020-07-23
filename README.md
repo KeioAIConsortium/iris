@@ -9,6 +9,6 @@
     explicitly handle this
   - [ ] etc?
 - [x] GPU state discovery
-- [ ] Discover how many containers are currently available
+- [x] Discover how many containers are currently available
 - [ ] Give GPUs on request
 - [ ] Show how many GPUs are currently available via HTTP API
