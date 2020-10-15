@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -286,6 +287,35 @@ func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []
 	return
 }
 
+type Response struct {
+	StatusCode int         `json:"StatusCode"`
+	Headers    interface{} `json:"headers"`
+	Body       interface{} `json:"body"`
+}
+
+func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
+	var devicesAddress []string
+
+	for _, d := range devices {
+		dp, err := d.GetAllRunningProcesses()
+		if err != nil {
+			log.Fatalln("error:", err.Error())
+		}
+		if len(dp) == 0 {
+			devicesAddress = append(devicesAddress, getPciAddress(d))
+		}
+	}
+
+	var da string = ""
+	if len(devicesAddress) > 0 {
+		da = devicesAddress[0]
+	}
+
+	res := &Response{StatusCode: 200, Headers: map[string]string{"Content-Type": "application/json"}, Body: map[string]string{"pci_address": da}}
+
+	return jsonifyPretty(res), nil
+}
+
 func main() {
 	log.Println("Initializing NVML...")
 	err := nvml.Init()
@@ -346,6 +376,26 @@ func main() {
 		})
 	//state := initState(containers, devices)
 	initState(managedContainers, devices)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		ret, err := getLeastUsedGpuPciAddress(devices)
+
+		if err != nil {
+			log.Fatalln("error:", err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, ret)
+	})
+
+	s := http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+	s.ListenAndServe()
 
 	e.AddHandler([]string{"lifecycle"}, func(e api.Event) {
 		event := &api.EventLifecycle{}
