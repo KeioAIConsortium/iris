@@ -15,6 +15,7 @@ import (
 	api "github.com/lxc/lxd/shared/api"
 )
 
+// Log表示用(改行文字を含むため)
 func jsonifyPretty(value interface{}) string {
 	jsonValue, _ := json.MarshalIndent(value, "", "  ")
 	return string(jsonValue)
@@ -310,8 +311,9 @@ func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
 	}
 
 	res := &Response{Pci: da}
+	res_json, _ := json.Marshal(res)
 
-	return jsonifyPretty(res), nil
+	return string(res_json), nil
 }
 
 func main() {
