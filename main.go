@@ -288,9 +288,7 @@ func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []
 }
 
 type Response struct {
-	StatusCode int         `json:"StatusCode"`
-	Headers    interface{} `json:"headers"`
-	Body       interface{} `json:"body"`
+	Pci string `json: "pci"`
 }
 
 func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
@@ -311,7 +309,7 @@ func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
 		da = devicesAddress[0]
 	}
 
-	res := &Response{StatusCode: 200, Headers: map[string]string{"Content-Type": "application/json"}, Body: map[string]string{"pci_address": da}}
+	res := &Response{Pci: da}
 
 	return jsonifyPretty(res), nil
 }
