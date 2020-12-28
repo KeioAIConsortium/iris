@@ -1,6 +1,10 @@
 package main
 
 import (
+	crand "crypto/rand"
+	"math"
+	"math/rand"
+	"math/big"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -293,7 +297,7 @@ type Response struct {
 }
 
 func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
-	var devicesAddress []string
+	var deviceAddresses []string
 
 	for _, d := range devices {
 		dp, err := d.GetAllRunningProcesses()
@@ -301,13 +305,15 @@ func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
 			log.Fatalln("error:", err.Error())
 		}
 		if len(dp) == 0 {
-			devicesAddress = append(devicesAddress, getPciAddress(d))
+			deviceAddresses = append(deviceAddresses, getPciAddress(d))
 		}
 	}
 
 	var da string = ""
-	if len(devicesAddress) > 0 {
-		da = devicesAddress[0]
+	if len(deviceAddresses) > 0 {
+		seed, _ := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
+		rand.Seed(seed.Int64())
+		da = deviceAddresses[rand.Int() % len(deviceAddresses)]
 	}
 
 	res := &Response{Pci: da}
