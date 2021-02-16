@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"regexp"
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 
@@ -136,12 +137,20 @@ func (s *State) releaseGpu(c lxd.InstanceServer, containerName string) error {
 }
 
 func initState(containers []api.Container, devices []nvml.Device) State {
+	// confirm singleuser-instance containers only
+	r, _ := regexp.Compile("^jupyterhub-singleuser-instance")
+
 	containersState := make([]string, len(devices), len(devices))
+
 	for i := 0; i < len(devices); i++ {
 		containersState[i] = ""
 	}
 
 	for i, container := range containers {
+		if r.MatchString(container.Name) == false {
+			continue
+		}
+
 		for _, device := range container.ExpandedDevices {
 			deviceType, ok := device["type"]
 			if !ok {
