@@ -20,6 +20,11 @@ import (
 	api "github.com/lxc/lxd/shared/api"
 )
 
+var (
+	Version  = "v0.2"
+	Revision = "v0.2"
+)
+
 // Log表示用(改行文字を含むため)
 func jsonifyPretty(value interface{}) string {
 	jsonValue, _ := json.MarshalIndent(value, "", "  ")
