@@ -366,7 +366,7 @@ func main() {
 	}
 
 	// NOTE: don't use below for now
-	// 	     if you want to connect GPU info with containers info, you can uncomment
+	// if you want to connect GPU info with containers info, you can uncomment
 	/*
 		c, err := lxd.ConnectLXDUnix("", nil)
 		if err != nil {
@@ -427,7 +427,7 @@ func main() {
 	s.ListenAndServe()
 
 	// NOTE: don't use below for now
-	// 	     if you want to connect GPU info with containers info, you can uncomment
+	// if you want to connect GPU info with containers info, you can uncomment
 	/*
 		e.AddHandler([]string{"lifecycle"}, func(e api.Event) {
 			event := &api.EventLifecycle{}
