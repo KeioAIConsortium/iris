@@ -2,17 +2,17 @@ package main
 
 import (
 	crand "crypto/rand"
-	"math"
-	"math/rand"
-	"math/big"
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"math/big"
+	"math/rand"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"regexp"
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 
@@ -25,7 +25,7 @@ var (
 	Revision = "v0.2"
 )
 
-// Log表示用(改行文字を含むため)
+// used for log output becuase this includes new-line character
 func jsonifyPretty(value interface{}) string {
 	jsonValue, _ := json.MarshalIndent(value, "", "  ")
 	return string(jsonValue)
@@ -307,10 +307,17 @@ func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []
 }
 
 type Response struct {
-	Pci string `json: "pci"`
+	Pci string `json:"pci"`
 }
 
-func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
+var randSource = NewRandSource()
+
+func NewRandSource() *rand.Rand {
+	seed, _ := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
+	return rand.New(rand.NewSource(seed.Int64()))
+}
+
+func getNotUsedGpuPciAddress(devices []nvml.Device) (string, error) {
 	var deviceAddresses []string
 
 	for _, d := range devices {
@@ -325,15 +332,13 @@ func getLeastUsedGpuPciAddress(devices []nvml.Device) (string, error) {
 
 	var da string = ""
 	if len(deviceAddresses) > 0 {
-		seed, _ := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
-		rand.Seed(seed.Int64())
-		da = deviceAddresses[rand.Int() % len(deviceAddresses)]
+		da = deviceAddresses[randSource.Int()%len(deviceAddresses)]
 	}
 
 	res := &Response{Pci: da}
-	res_json, _ := json.Marshal(res)
+	resJSON, _ := json.Marshal(res)
 
-	return string(res_json), nil
+	return string(resJSON), nil
 }
 
 func main() {
@@ -360,46 +365,50 @@ func main() {
 		devices = append(devices, *device)
 	}
 
-	c, err := lxd.ConnectLXDUnix("", nil)
-	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
-	}
+	// NOTE: don't use below for now
+	// 	     if you want to connect GPU info with containers info, you can uncomment
+	/*
+		c, err := lxd.ConnectLXDUnix("", nil)
+		if err != nil {
+			log.Fatalln("LXD error:", err.Error())
+		}
 
-	clusterInfo, _, err := c.GetCluster()
-	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
-	}
-	if clusterInfo.Enabled {
-		log.Println("LXD is running in cluster mode")
-	} else {
-		log.Println("LXD is running in standalone mode")
-	}
+		clusterInfo, _, err := c.GetCluster()
+		if err != nil {
+			log.Fatalln("LXD error:", err.Error())
+		}
+		if clusterInfo.Enabled {
+			log.Println("LXD is running in cluster mode")
+		} else {
+			log.Println("LXD is running in standalone mode")
+		}
 
-	e, err := c.GetEvents()
-	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
-	}
+		e, err := c.GetEvents()
+		if err != nil {
+			log.Fatalln("LXD error:", err.Error())
+		}
 
-	// TODO: data race between lifecycle handler and container check
-	containers, err := c.GetContainers()
-	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
-	}
+		// TODO: data race between lifecycle handler and container check
+		containers, err := c.GetContainers()
+		if err != nil {
+			log.Fatalln("LXD error:", err.Error())
+		}
 
-	clusterState := initClusterState(containers)
-	clusterState.logManagedContainers(clusterInfo.ServerName)
-	managedContainerNames :=
-		clusterState.getManagedContainers(clusterInfo.ServerName)
-	managedContainers :=
-		filterContainers(containers, func(container api.Container) bool {
-			return stringSliceContains(managedContainerNames, container.Name)
-		})
-	//state := initState(containers, devices)
-	initState(managedContainers, devices)
+		clusterState := initClusterState(containers)
+		clusterState.logManagedContainers(clusterInfo.ServerName)
+		managedContainerNames :=
+			clusterState.getManagedContainers(clusterInfo.ServerName)
+		managedContainers :=
+			filterContainers(containers, func(container api.Container) bool {
+				return stringSliceContains(managedContainerNames, container.Name)
+			})
+		//state := initState(containers, devices)
+		initState(managedContainers, devices)
+	*/
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		ret, err := getLeastUsedGpuPciAddress(devices)
+		ret, err := getNotUsedGpuPciAddress(devices)
 
 		if err != nil {
 			log.Fatalln("error:", err.Error())
@@ -417,68 +426,72 @@ func main() {
 	}
 	s.ListenAndServe()
 
-	e.AddHandler([]string{"lifecycle"}, func(e api.Event) {
-		event := &api.EventLifecycle{}
-		err := json.Unmarshal(e.Metadata, event)
-		if err != nil {
-			log.Fatalln("error:", err.Error())
-		}
-
-		components := strings.Split(event.Source, "/")
-		containerName := components[len(components)-1]
-
-		log.Printf("%s: %s\n", containerName, event.Action)
-		log.Println(jsonifyPretty(event))
-
-		switch event.Action {
-		case "container-created":
-			err := clusterState.add(containerName, clusterInfo.ServerName)
+	// NOTE: don't use below for now
+	// 	     if you want to connect GPU info with containers info, you can uncomment
+	/*
+		e.AddHandler([]string{"lifecycle"}, func(e api.Event) {
+			event := &api.EventLifecycle{}
+			err := json.Unmarshal(e.Metadata, event)
 			if err != nil {
 				log.Fatalln("error:", err.Error())
 			}
-			clusterState.logManagedContainers(clusterInfo.ServerName)
-			return
-		case "container-deleted":
-			err := clusterState.remove(containerName, clusterInfo.ServerName)
+
+			components := strings.Split(event.Source, "/")
+			containerName := components[len(components)-1]
+
+			log.Printf("%s: %s\n", containerName, event.Action)
+			log.Println(jsonifyPretty(event))
+
+			switch event.Action {
+			case "container-created":
+				err := clusterState.add(containerName, clusterInfo.ServerName)
+				if err != nil {
+					log.Fatalln("error:", err.Error())
+				}
+				clusterState.logManagedContainers(clusterInfo.ServerName)
+				return
+			case "container-deleted":
+				err := clusterState.remove(containerName, clusterInfo.ServerName)
+				if err != nil {
+					log.Fatalln("error:", err.Error())
+				}
+				clusterState.logManagedContainers(clusterInfo.ServerName)
+				return
+			case "container-renamed":
+				newContainerName, ok := event.Context["new_name"].(string)
+				if !ok {
+					log.Fatalln("\"new_name\" key in event.Context not found")
+				}
+				err := clusterState.rename(containerName, newContainerName)
+				if err != nil {
+					log.Fatalln("error:", err.Error())
+				}
+				clusterState.logManagedContainers(clusterInfo.ServerName)
+				return
+			default:
+			}
+
+			server, err := clusterState.query(containerName)
 			if err != nil {
 				log.Fatalln("error:", err.Error())
 			}
-			clusterState.logManagedContainers(clusterInfo.ServerName)
-			return
-		case "container-renamed":
-			newContainerName, ok := event.Context["new_name"].(string)
-			if !ok {
-				log.Fatalln("\"new_name\" key in event.Context not found")
+			if server != clusterInfo.ServerName {
+				log.Printf("Container %s belongs to %s, ignoring\n", containerName, server)
+				return
 			}
-			err := clusterState.rename(containerName, newContainerName)
-			if err != nil {
-				log.Fatalln("error:", err.Error())
+
+			switch event.Action {
+			case "container-started":
+				log.Println("Attaching GPU to container")
+				//state.requestGpu(c, containerName)
+			case "container-shutdown":
+				log.Println("Releasing GPU from container")
+				//state.releaseGpu(c, containerName)
+			default:
+				return
 			}
-			clusterState.logManagedContainers(clusterInfo.ServerName)
-			return
-		default:
-		}
-
-		server, err := clusterState.query(containerName)
-		if err != nil {
-			log.Fatalln("error:", err.Error())
-		}
-		if server != clusterInfo.ServerName {
-			log.Printf("Container %s belongs to %s, ignoring\n", containerName, server)
-			return
-		}
-
-		switch event.Action {
-		case "container-started":
-			log.Println("Attaching GPU to container")
-			//state.requestGpu(c, containerName)
-		case "container-shutdown":
-			log.Println("Releasing GPU from container")
-			//state.releaseGpu(c, containerName)
-		default:
-			return
-		}
-	})
+		})
+	*/
 
 	log.Println("Going to sleep...")
 	select {}
