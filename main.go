@@ -9,9 +9,12 @@ import (
 	"math/big"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
+	lxd "github.com/lxc/lxd/client"
+	api "github.com/lxc/lxd/shared/api"
 )
 
 // TODO: get GPU address the number of which assigned to singleuser is the smallest without runnning any processes
@@ -31,10 +34,6 @@ func getPciAddress(device nvml.Device) string {
 	return strings.ToLower(device.PCI.BusID[4:])
 }
 
-type Response struct {
-	Pci string `json:"pci"`
-}
-
 var randSource = NewRandSource()
 
 func NewRandSource() *rand.Rand {
@@ -42,25 +41,119 @@ func NewRandSource() *rand.Rand {
 	return rand.New(rand.NewSource(seed.Int64()))
 }
 
-func getNotUsedGpuPciAddress(devices []nvml.Device) (string, error) {
-	var deviceAddresses []string
+type ClusterState struct {
+	locationLookup map[string]string
+}
 
-	for _, d := range devices {
-		dp, err := d.GetAllRunningProcesses()
+func initClusterState(containers []api.Container) ClusterState {
+	locationLookup := map[string]string{}
+	for _, container := range containers {
+		locationLookup[container.Name] = container.Location
+	}
+
+	return ClusterState{
+		locationLookup: locationLookup,
+	}
+}
+
+func (cs *ClusterState) logManagedContainers(server string) {
+	log.Println("Currently managed containers:")
+	for _, containerName := range cs.getManagedContainers(server) {
+		log.Println("-", containerName)
+	}
+}
+
+func (cs *ClusterState) getManagedContainers(server string) []string {
+	var managedContainers []string
+	for k, v := range cs.locationLookup {
+		if v == server {
+			managedContainers = append(managedContainers, k)
+		}
+	}
+	return managedContainers
+}
+
+func stringSliceContains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}
+
+func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []api.Container) {
+	for _, s := range ss {
+		if test(s) {
+			ret = append(ret, s)
+		}
+	}
+	return
+}
+
+type Response struct {
+	Pci string `json:"pci"`
+}
+
+func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device) (string, error) {
+	gpuLookup := map[string]int{}
+	for _, device := range devices {
+		gpuLookup[getPciAddress(device)] = 0
+	}
+
+	for _, container := range containers {
+		for _, device := range container.ExpandedDevices {
+			deviceType, ok := device["type"]
+			if !ok {
+				log.Fatalf("%s: expected \"type\" for device: %s", container.Name, jsonifyPretty(device))
+			}
+			if deviceType != "gpu" {
+				continue
+			}
+
+			pciAddress, ok := device["pci"]
+			if !ok {
+				log.Fatalf("%s: found invalid gpu device (no pci address specified): %s", container.Name, jsonifyPretty(device))
+			}
+
+			found := false
+			for _, device := range devices {
+				if pciAddress == getPciAddress(device) {
+					found = true
+				}
+			}
+			if !found {
+				log.Fatalf("%s: attached gpu not found: %s", container.Name, jsonifyPretty(device))
+			}
+
+			gpuLookup[pciAddress]++
+
+			log.Println(container.Name, jsonifyPretty(device))
+		}
+	}
+
+	availableGpuLookup := map[string]int{}
+
+	for _, device := range devices {
+		processes, err := device.GetAllRunningProcesses()
 		if err != nil {
 			log.Fatalln("error:", err.Error())
 		}
-		if len(dp) == 0 {
-			deviceAddresses = append(deviceAddresses, getPciAddress(d))
+		if len(processes) == 0 {
+			availableGpuLookup[getPciAddress(device)] = gpuLookup[getPciAddress(device)]
 		}
 	}
 
-	var da string = ""
-	if len(deviceAddresses) > 0 {
-		da = deviceAddresses[randSource.Int()%len(deviceAddresses)]
+	leastAssignedGPUAddress := ""
+	num := math.MaxInt32
+
+	for k, v := range availableGpuLookup {
+		if num > v {
+			leastAssignedGPUAddress = k
+		}
 	}
 
-	res := &Response{Pci: da}
+	res := &Response{Pci: leastAssignedGPUAddress}
 
 	return jsonifyPretty(res), nil
 }
@@ -89,9 +182,41 @@ func main() {
 		devices = append(devices, *device)
 	}
 
+	c, err := lxd.ConnectLXDUnix("", nil)
+	if err != nil {
+		log.Fatalln("LXD error:", err.Error())
+	}
+
+	clusterInfo, _, err := c.GetCluster()
+	if err != nil {
+		log.Fatalln("LXD error:", err.Error())
+	}
+	if clusterInfo.Enabled {
+		log.Println("LXD is running in cluster mode")
+	} else {
+		log.Println("LXD is running in standalone mode")
+	}
+
+	// confirm singleuser-instance containers only
+	reg, _ := regexp.Compile("^jupyterhub-singleuser-instance")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		ret, err := getNotUsedGpuPciAddress(devices)
+		containers, err := c.GetContainers()
+		if err != nil {
+			log.Fatalln("LXD error:", err.Error())
+		}
+
+		clusterState := initClusterState(containers)
+		clusterState.logManagedContainers(clusterInfo.ServerName)
+		managedContainerNames :=
+			clusterState.getManagedContainers(clusterInfo.ServerName)
+		managedContainers :=
+			filterContainers(containers, func(container api.Container) bool {
+				return reg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name)
+			})
+
+		ret, err := getAvailableGpuPciAddress(managedContainers, devices)
 
 		if err != nil {
 			log.Fatalln("error:", err.Error())
