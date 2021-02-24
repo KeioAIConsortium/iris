@@ -103,7 +103,10 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 
 			pciAddress, ok := device["pci"]
 			if !ok {
-				log.Fatalf("%s: found invalid gpu device (no pci address specified): %s", container.Name, jsonifyPretty(device))
+				// NOTE: there are containers in which no pci address is specified because of previous system specifications
+				// but after starting all containers in the new environment, the problem will be solved
+				continue
+				// log.Fatalf("%s: found invalid gpu device (no pci address specified): %s", container.Name, jsonifyPretty(device))
 			}
 
 			found := false
