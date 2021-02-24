@@ -1,13 +1,10 @@
 package main
 
 import (
-	crand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
-	"math/big"
-	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
@@ -32,13 +29,6 @@ func jsonifyPretty(value interface{}) string {
 
 func getPciAddress(device nvml.Device) string {
 	return strings.ToLower(device.PCI.BusID[4:])
-}
-
-var randSource = NewRandSource()
-
-func NewRandSource() *rand.Rand {
-	seed, _ := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
-	return rand.New(rand.NewSource(seed.Int64()))
 }
 
 type ClusterState struct {
@@ -150,6 +140,17 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 	for k, v := range availableGpuLookup {
 		if num > v {
 			leastAssignedGPUAddress = k
+			num = v
+		}
+	}
+
+	// 割り当てるGPUがない場合プロセスが動いていようと一番コンテナに割り当てる数が少ないGPUを割り当てる
+	if leastAssignedGPUAddress == "" {
+		for k, v := range gpuLookup {
+			if num > v {
+				leastAssignedGPUAddress = k
+				num = v
+			}
 		}
 	}
 
