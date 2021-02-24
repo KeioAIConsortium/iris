@@ -137,7 +137,10 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 	leastAssignedGPUAddress := ""
 	num := math.MaxInt32
 
+	log.Println("Available GPUs")
 	for k, v := range availableGpuLookup {
+		log.Println(k, ": ", "assigned to", v, " containers")
+
 		if num > v {
 			leastAssignedGPUAddress = k
 			num = v
