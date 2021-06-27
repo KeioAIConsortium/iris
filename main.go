@@ -141,21 +141,21 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 	num := math.MaxInt32
 
 	log.Println("Available GPUs")
-	for k, v := range availableGpuLookup {
-		log.Println(k, ": ", "assigned to", v, " containers")
+	for address, assignedNum := range availableGpuLookup {
+		log.Println(address, ": ", "assigned to", assignedNum, " containers")
 
-		if num > v {
-			leastAssignedGPUAddress = k
-			num = v
+		if num > assignedNum {
+			leastAssignedGPUAddress = address
+			num = assignedNum
 		}
 	}
 
-	// 割り当てるGPUがない場合プロセスが動いていようと一番コンテナに割り当てる数が少ないGPUを割り当てる
+	// MEMO: assign the gpu whose assosiated containers' number is the smallest even through the gpu has working processes
 	if leastAssignedGPUAddress == "" {
-		for k, v := range gpuLookup {
-			if num > v {
-				leastAssignedGPUAddress = k
-				num = v
+		for address, assignedNum := range gpuLookup {
+			if num > assignedNum {
+				leastAssignedGPUAddress = address
+				num = assignedNum
 			}
 		}
 	}
