@@ -14,7 +14,13 @@ import (
 	api "github.com/lxc/lxd/shared/api"
 )
 
-// TODO: get GPU address the number of which assigned to singleuser is the smallest without runnning any processes
+type Response struct {
+	Pci string `json:"pci"`
+}
+
+var lxdServer lxd.InstanceServer
+var clusterInfo *api.Cluster
+var devices []nvml.Device
 
 // for log output becuase this includes new-line character
 func jsonifyPrettyForLog(value interface{}) string {
@@ -79,10 +85,6 @@ func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []
 		}
 	}
 	return
-}
-
-type Response struct {
-	Pci string `json:"pci"`
 }
 
 func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device) (string, error) {
@@ -194,10 +196,6 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, ret)
 }
-
-var lxdServer lxd.InstanceServer
-var clusterInfo *api.Cluster
-var devices []nvml.Device
 
 func init() {
 	log.Println("Initializing NVML...")
