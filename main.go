@@ -165,7 +165,41 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 	return jsonifyPretty(res), nil
 }
 
-func main() {
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	// confirm singleuser-instance containers only
+	reg, _ := regexp.Compile("^jupyterhub-singleuser-instance")
+
+	containers, err := lxdServer.GetContainers()
+	if err != nil {
+		log.Fatalln("LXD error:", err.Error())
+	}
+
+	clusterState := initClusterState(containers)
+	clusterState.logManagedContainers(clusterInfo.ServerName)
+	managedContainerNames :=
+		clusterState.getManagedContainers(clusterInfo.ServerName)
+	managedContainers :=
+		filterContainers(containers, func(container api.Container) bool {
+			return reg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name)
+		})
+
+	ret, err := getAvailableGpuPciAddress(managedContainers, devices)
+
+	if err != nil {
+		log.Fatalln("error:", err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, ret)
+}
+
+var lxdServer lxd.InstanceServer
+var clusterInfo *api.Cluster
+var devices []nvml.Device
+
+func init() {
 	log.Println("Initializing NVML...")
 	err := nvml.Init()
 	if err != nil {
@@ -179,7 +213,6 @@ func main() {
 	}
 	log.Printf("Detected %d GPUs.\n", count)
 
-	var devices []nvml.Device
 	for i := uint(0); i < count; i++ {
 		device, err := nvml.NewDevice(i)
 		if err != nil {
@@ -189,12 +222,12 @@ func main() {
 		devices = append(devices, *device)
 	}
 
-	c, err := lxd.ConnectLXDUnix("", nil)
+	lxdServer, err = lxd.ConnectLXDUnix("", nil)
 	if err != nil {
 		log.Fatalln("LXD error:", err.Error())
 	}
 
-	clusterInfo, _, err := c.GetCluster()
+	clusterInfo, _, err = lxdServer.GetCluster()
 	if err != nil {
 		log.Fatalln("LXD error:", err.Error())
 	}
@@ -203,37 +236,11 @@ func main() {
 	} else {
 		log.Println("LXD is running in standalone mode")
 	}
+}
 
-	// confirm singleuser-instance containers only
-	reg, _ := regexp.Compile("^jupyterhub-singleuser-instance")
-
+func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		containers, err := c.GetContainers()
-		if err != nil {
-			log.Fatalln("LXD error:", err.Error())
-		}
-
-		clusterState := initClusterState(containers)
-		clusterState.logManagedContainers(clusterInfo.ServerName)
-		managedContainerNames :=
-			clusterState.getManagedContainers(clusterInfo.ServerName)
-		managedContainers :=
-			filterContainers(containers, func(container api.Container) bool {
-				return reg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name)
-			})
-
-		ret, err := getAvailableGpuPciAddress(managedContainers, devices)
-
-		if err != nil {
-			log.Fatalln("error:", err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, err.Error())
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, ret)
-	})
+	mux.HandleFunc("/", rootHandler)
 
 	s := http.Server{
 		Addr:    ":80",
