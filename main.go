@@ -197,7 +197,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ret)
 }
 
-func init() {
+func main() {
 	log.Println("Initializing NVML...")
 	err := nvml.Init()
 	if err != nil {
@@ -234,9 +234,9 @@ func init() {
 	} else {
 		log.Println("LXD is running in standalone mode")
 	}
-}
 
-func main() {
+	log.Println("Initialization is done")
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
 
