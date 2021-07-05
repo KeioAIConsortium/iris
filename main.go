@@ -41,9 +41,9 @@ type ClusterState struct {
 	locationLookup map[string]string
 }
 
-func initClusterState(containers []api.Container) ClusterState {
+func initClusterState(containers *[]api.Container) ClusterState {
 	locationLookup := map[string]string{}
-	for _, container := range containers {
+	for _, container := range *containers {
 		locationLookup[container.Name] = container.Location
 	}
 
@@ -54,23 +54,23 @@ func initClusterState(containers []api.Container) ClusterState {
 
 func (cs *ClusterState) logManagedContainers(server string) {
 	log.Println("Currently managed containers:")
-	for _, containerName := range cs.getManagedContainers(server) {
+	for _, containerName := range *cs.getManagedContainers(server) {
 		log.Println("-", containerName)
 	}
 }
 
-func (cs *ClusterState) getManagedContainers(server string) []string {
+func (cs *ClusterState) getManagedContainers(server string) *[]string {
 	var managedContainers []string
 	for k, v := range cs.locationLookup {
 		if v == server {
 			managedContainers = append(managedContainers, k)
 		}
 	}
-	return managedContainers
+	return &managedContainers
 }
 
-func stringSliceContains(s []string, e string) bool {
-	for _, a := range s {
+func stringSliceContains(s *[]string, e string) bool {
+	for _, a := range *s {
 		if a == e {
 			return true
 		}
@@ -78,8 +78,8 @@ func stringSliceContains(s []string, e string) bool {
 	return false
 }
 
-func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []api.Container) {
-	for _, s := range ss {
+func filterContainers(ss *[]api.Container, test func(api.Container) bool) (ret []api.Container) {
+	for _, s := range *ss {
 		if test(s) {
 			ret = append(ret, s)
 		}
@@ -87,13 +87,13 @@ func filterContainers(ss []api.Container, test func(api.Container) bool) (ret []
 	return
 }
 
-func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device) (string, error) {
+func getAvailableGpuPciAddress(containers *[]api.Container, devices *[]nvml.Device) string {
 	gpuLookup := map[string]int{}
-	for _, device := range devices {
+	for _, device := range *devices {
 		gpuLookup[getPciAddress(device)] = 0
 	}
 
-	for _, container := range containers {
+	for _, container := range *containers {
 		for _, device := range container.ExpandedDevices {
 			deviceType, ok := device["type"]
 			if !ok {
@@ -112,7 +112,7 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 			}
 
 			found := false
-			for _, device := range devices {
+			for _, device := range *devices {
 				if pciAddress == getPciAddress(device) {
 					found = true
 				}
@@ -129,7 +129,7 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 
 	availableGpuLookup := map[string]int{}
 
-	for _, device := range devices {
+	for _, device := range *devices {
 		processes, err := device.GetAllRunningProcesses()
 		if err != nil {
 			log.Fatalln("error:", err.Error())
@@ -152,7 +152,7 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 		}
 	}
 
-	// MEMO: assign the gpu whose assosiated containers' number is the smallest even through the gpu has working processes
+	// MEMO: assign the gpu whose associated containers' number is the smallest even through the gpu has working processes
 	if leastAssignedGPUAddress == "" {
 		for address, assignedNum := range gpuLookup {
 			if num > assignedNum {
@@ -164,34 +164,31 @@ func getAvailableGpuPciAddress(containers []api.Container, devices []nvml.Device
 
 	res := &Response{Pci: leastAssignedGPUAddress}
 
-	return jsonifyPretty(res), nil
+	return jsonifyPretty(res)
 }
+
+var containerNameReg = regexp.MustCompile("^jupyterhub-singleuser-instance")
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	// confirm singleuser-instance containers only
-	reg, _ := regexp.Compile("^jupyterhub-singleuser-instance")
-
 	containers, err := lxdServer.GetContainers()
 	if err != nil {
 		log.Fatalln("LXD error:", err.Error())
 	}
 
-	clusterState := initClusterState(containers)
+	clusterState := initClusterState(&containers)
 	clusterState.logManagedContainers(clusterInfo.ServerName)
 	managedContainerNames :=
 		clusterState.getManagedContainers(clusterInfo.ServerName)
 	managedContainers :=
-		filterContainers(containers, func(container api.Container) bool {
-			return reg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name)
+		filterContainers(&containers, func(container api.Container) bool {
+			return containerNameReg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name)
 		})
 
-	ret, err := getAvailableGpuPciAddress(managedContainers, devices)
+	ret := getAvailableGpuPciAddress(&managedContainers, &devices)
 
 	if err != nil {
 		log.Fatalln("error:", err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, err.Error())
-		return
 	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, ret)
