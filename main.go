@@ -22,12 +22,6 @@ var lxdServer lxd.InstanceServer
 var clusterInfo *api.Cluster
 var devices []nvml.Device
 
-// for log output becuase this includes new-line character
-func jsonifyPrettyForLog(value interface{}) string {
-	jsonValue, _ := json.MarshalIndent(value, "", "  ")
-	return string(jsonValue)
-}
-
 func jsonifyPretty(value interface{}) string {
 	jsonValue, _ := json.Marshal(value)
 	return string(jsonValue)
