@@ -20,14 +20,14 @@ type Response struct {
 
 var lxdServer lxd.InstanceServer
 var clusterInfo *api.Cluster
-var devices []nvml.Device
+var devices []*nvml.Device
 
 func jsonifyPretty(value interface{}) string {
 	jsonValue, _ := json.Marshal(value)
 	return string(jsonValue)
 }
 
-func getPciAddress(device nvml.Device) string {
+func getPciAddress(device *nvml.Device) string {
 	return strings.ToLower(device.PCI.BusID[4:])
 }
 
@@ -35,9 +35,9 @@ type ClusterState struct {
 	locationLookup map[string]string
 }
 
-func initClusterState(containers *[]api.Container) ClusterState {
+func initClusterState(containers []api.Container) ClusterState {
 	locationLookup := map[string]string{}
-	for _, container := range *containers {
+	for _, container := range containers {
 		locationLookup[container.Name] = container.Location
 	}
 
@@ -48,46 +48,38 @@ func initClusterState(containers *[]api.Container) ClusterState {
 
 func (cs *ClusterState) logManagedContainers(server string) {
 	log.Println("Currently managed containers:")
-	for _, containerName := range *cs.getManagedContainers(server) {
+	for _, containerName := range cs.getManagedContainers(server) {
 		log.Println("-", containerName)
 	}
 }
 
-func (cs *ClusterState) getManagedContainers(server string) *[]string {
-	var managedContainers []string
+func (cs *ClusterState) getManagedContainers(server string) []*string {
+	var managedContainers []*string
 	for k, v := range cs.locationLookup {
 		if v == server {
-			managedContainers = append(managedContainers, k)
+			managedContainers = append(managedContainers, &k)
 		}
 	}
-	return &managedContainers
+	return managedContainers
 }
 
-func stringSliceContains(s *[]string, e string) bool {
-	for _, a := range *s {
-		if a == e {
+func stringSliceContains(s []*string, e *string) bool {
+	for _, a := range s {
+		if *a == *e {
 			return true
 		}
 	}
 	return false
 }
 
-func filterContainers(ss *[]api.Container, test func(api.Container) bool) (ret []api.Container) {
-	for _, s := range *ss {
-		if test(s) {
-			ret = append(ret, s)
-		}
-	}
-	return
-}
-
-func getAvailableGpuPciAddress(containers *[]api.Container, devices *[]nvml.Device) string {
+func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Device) string {
 	gpuLookup := map[string]int{}
-	for _, device := range *devices {
+
+	for _, device := range devices {
 		gpuLookup[getPciAddress(device)] = 0
 	}
 
-	for _, container := range *containers {
+	for _, container := range containers {
 		for _, device := range container.ExpandedDevices {
 			deviceType, ok := device["type"]
 			if !ok {
@@ -106,7 +98,7 @@ func getAvailableGpuPciAddress(containers *[]api.Container, devices *[]nvml.Devi
 			}
 
 			found := false
-			for _, device := range *devices {
+			for _, device := range devices {
 				if pciAddress == getPciAddress(device) {
 					found = true
 				}
@@ -123,7 +115,7 @@ func getAvailableGpuPciAddress(containers *[]api.Container, devices *[]nvml.Devi
 
 	availableGpuLookup := map[string]int{}
 
-	for _, device := range *devices {
+	for _, device := range devices {
 		processes, err := device.GetAllRunningProcesses()
 		if err != nil {
 			log.Fatalln("error:", err.Error())
@@ -170,16 +162,19 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatalln("LXD error:", err.Error())
 	}
 
-	clusterState := initClusterState(&containers)
+	clusterState := initClusterState(containers)
 	clusterState.logManagedContainers(clusterInfo.ServerName)
 	managedContainerNames :=
 		clusterState.getManagedContainers(clusterInfo.ServerName)
-	managedContainers :=
-		filterContainers(&containers, func(container api.Container) bool {
-			return containerNameReg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name)
-		})
 
-	ret := getAvailableGpuPciAddress(&managedContainers, &devices)
+	var managedContainers []*api.Container
+	for _, container := range containers {
+		if containerNameReg.MatchString(container.Name) && stringSliceContains(managedContainerNames, &container.Name) {
+			managedContainers = append(managedContainers, &container)
+		}
+	}
+
+	ret := getAvailableGpuPciAddress(managedContainers, devices)
 
 	if err != nil {
 		log.Fatalln("error:", err.Error())
@@ -208,7 +203,7 @@ func main() {
 			log.Fatalln("NVML error:", err.Error())
 		}
 		log.Println("GPU ", i, ": ", device.PCI.BusID)
-		devices = append(devices, *device)
+		devices = append(devices, device)
 	}
 
 	lxdServer, err = lxd.ConnectLXDUnix("", nil)
