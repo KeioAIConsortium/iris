@@ -35,7 +35,7 @@ type ClusterState struct {
 	locationLookup map[string]string
 }
 
-func initClusterState(containers []api.Container) ClusterState {
+func initClusterState(containers []*api.Container) ClusterState {
 	locationLookup := map[string]string{}
 	for _, container := range containers {
 		locationLookup[container.Name] = container.Location
@@ -53,19 +53,19 @@ func (cs *ClusterState) logManagedContainers(server string) {
 	}
 }
 
-func (cs *ClusterState) getManagedContainers(server string) []*string {
-	var managedContainers []*string
+func (cs *ClusterState) getManagedContainers(server string) []string {
+	var managedContainers []string
 	for k, v := range cs.locationLookup {
 		if v == server {
-			managedContainers = append(managedContainers, &k)
+			managedContainers = append(managedContainers, k)
 		}
 	}
 	return managedContainers
 }
 
-func stringSliceContains(s []*string, e *string) bool {
+func stringSliceContains(s []string, e string) bool {
 	for _, a := range s {
-		if *a == *e {
+		if a == e {
 			return true
 		}
 	}
@@ -157,9 +157,14 @@ var containerNameReg = regexp.MustCompile("^jupyterhub-singleuser-instance")
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	// confirm singleuser-instance containers only
-	containers, err := lxdServer.GetContainers()
+	rawContainers, err := lxdServer.GetContainers()
 	if err != nil {
 		log.Fatalln("LXD error:", err.Error())
+	}
+
+	var containers []*api.Container
+	for _, c := range rawContainers {
+		containers = append(containers, &c)
 	}
 
 	clusterState := initClusterState(containers)
@@ -169,8 +174,8 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 	var managedContainers []*api.Container
 	for _, container := range containers {
-		if containerNameReg.MatchString(container.Name) && stringSliceContains(managedContainerNames, &container.Name) {
-			managedContainers = append(managedContainers, &container)
+		if containerNameReg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name) {
+			managedContainers = append(managedContainers, container)
 		}
 	}
 
