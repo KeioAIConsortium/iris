@@ -156,15 +156,14 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 var containerNameReg = regexp.MustCompile("^jupyterhub-singleuser-instance")
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
-	// confirm singleuser-instance containers only
 	rawContainers, err := lxdServer.GetContainers()
 	if err != nil {
 		log.Fatalln("LXD error:", err.Error())
 	}
 
 	var containers []*api.Container
-	for _, c := range rawContainers {
-		containers = append(containers, &c)
+	for i := range rawContainers {
+		containers = append(containers, &rawContainers[i])
 	}
 
 	clusterState := initClusterState(containers)
