@@ -47,9 +47,9 @@ func initClusterState(containers []*api.Container) ClusterState {
 }
 
 func (cs *ClusterState) logManagedContainers(server string) {
-	log.Println("Currently managed containers:")
+	log.Print("Currently managed containers:")
 	for _, containerName := range cs.getManagedContainers(server) {
-		log.Println("-", containerName)
+		log.Printf("- %s", containerName)
 	}
 }
 
@@ -109,7 +109,7 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 
 			gpuLookup[pciAddress]++
 
-			log.Println(container.Name, jsonifyPretty(device))
+			log.Printf("%s: %v", container.Name, jsonifyPretty(device))
 		}
 	}
 
@@ -128,9 +128,9 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 	leastAssignedGPUAddress := ""
 	num := math.MaxInt32
 
-	log.Println("Available GPUs")
+	log.Print("Available GPUs:")
 	for address, assignedNum := range availableGpuLookup {
-		log.Println(address, ": ", "assigned to", assignedNum, " containers")
+		log.Printf("%s: assigned to %d containers", address, assignedNum)
 
 		if num > assignedNum {
 			leastAssignedGPUAddress = address
@@ -179,53 +179,49 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ret := getAvailableGpuPciAddress(managedContainers, devices)
-
-	if err != nil {
-		log.Fatalln("error:", err.Error())
-	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, ret)
 }
 
 func main() {
-	log.Println("Initializing NVML...")
+	log.Print("Initializing NVML...")
 	err := nvml.Init()
 	if err != nil {
-		log.Fatalln("NVML error:", err.Error())
+		log.Fatalf("NVML error: %v", err)
 	}
 	defer nvml.Shutdown()
 
 	count, err := nvml.GetDeviceCount()
 	if err != nil {
-		log.Fatalln("Error getting device count:", err.Error())
+		log.Fatalf("Error getting device count: %v", err)
 	}
-	log.Printf("Detected %d GPUs.\n", count)
+	log.Printf("Detected %d GPUs.", count)
 
 	for i := uint(0); i < count; i++ {
 		device, err := nvml.NewDevice(i)
 		if err != nil {
-			log.Fatalln("NVML error:", err.Error())
+			log.Fatalf("NVML error: %v", err)
 		}
-		log.Println("GPU ", i, ": ", device.PCI.BusID)
+		log.Printf("GPU %d: %s", i, device.PCI.BusID)
 		devices = append(devices, device)
 	}
 
 	lxdServer, err = lxd.ConnectLXDUnix("", nil)
 	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
+		log.Fatalf("LXD error: %v", err)
 	}
 
 	clusterInfo, _, err = lxdServer.GetCluster()
 	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
+		log.Fatalf("LXD error: %v", err)
 	}
 	if clusterInfo.Enabled {
-		log.Println("LXD is running in cluster mode")
+		log.Print("LXD is running in cluster mode")
 	} else {
-		log.Println("LXD is running in standalone mode")
+		log.Print("LXD is running in standalone mode")
 	}
 
-	log.Println("Initialization is done")
+	log.Print("Initialization is done")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
@@ -236,6 +232,6 @@ func main() {
 	}
 	s.ListenAndServe()
 
-	log.Println("Going to sleep...")
+	log.Print("Going to sleep...")
 	select {}
 }
