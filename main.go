@@ -96,7 +96,10 @@ func main() {
 		Addr:    ":80",
 		Handler: mux,
 	}
-	s.ListenAndServe()
+	if err = s.ListenAndServe(); err != nil {
+		log.Printf("failed to http.Server.ListenAndServe(): %v", err)
+		return
+	}
 
 	log.Print("Going to sleep...")
 	select {}
