@@ -64,7 +64,7 @@ func main() {
 	log.Print("Initializing NVML...")
 	err := nvml.Init()
 	if err != nil {
-		log.Fatalf("NVML error: %v", err)
+		log.Fatalf("failed to nvml.Init(): %v", err)
 	}
 	defer func() {
 		err := nvml.Shutdown()
@@ -87,7 +87,7 @@ func main() {
 		return
 	}
 
-	log.Print("Initialization is done")
+	log.Print("Initialization complete.")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
