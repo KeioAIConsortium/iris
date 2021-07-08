@@ -189,7 +189,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("NVML error: %v", err)
 	}
-	defer nvml.Shutdown()
+	defer func() {
+		err := nvml.Shutdown()
+		if err != nil {
+			log.Fatalf("failed to nvml.Shutdown() successfully: %v", err)
+		}
+	}()
 
 	count, err := nvml.GetDeviceCount()
 	if err != nil {
