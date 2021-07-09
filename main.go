@@ -100,10 +100,10 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type response struct {
-		Pci string `json:"pci"`
+		PCI string `json:"pci"`
 	}
 	res, err := json.Marshal(response{
-		Pci: address,
+		PCI: address,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
