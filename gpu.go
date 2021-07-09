@@ -35,15 +35,15 @@ func (cs *ClusterState) getManagedContainers(server string) []string {
 	return managedContainers
 }
 
-func getPciAddress(device *nvml.Device) string {
+func getPCIAddress(device *nvml.Device) string {
 	return strings.ToLower(device.PCI.BusID[4:])
 }
 
-func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Device) (string, error) {
+func getAvailableGPUPCIAddress(containers []*api.Container, devices []*nvml.Device) (string, error) {
 	gpuLookup := map[string]int{}
 
 	for _, device := range devices {
-		gpuLookup[getPciAddress(device)] = 0
+		gpuLookup[getPCIAddress(device)] = 0
 	}
 
 	for _, container := range containers {
@@ -65,7 +65,7 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 
 			found := false
 			for _, device := range devices {
-				if pciAddress == getPciAddress(device) {
+				if pciAddress == getPCIAddress(device) {
 					found = true
 				}
 			}
@@ -79,7 +79,7 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 		}
 	}
 
-	availableGpuLookup := map[string]int{}
+	availableGPULookup := map[string]int{}
 
 	for _, device := range devices {
 		processes, err := device.GetAllRunningProcesses()
@@ -87,7 +87,7 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 			return "", xerrors.Errorf("failed to GetAllRunningProcesses(): %w", err)
 		}
 		if len(processes) == 0 {
-			availableGpuLookup[getPciAddress(device)] = gpuLookup[getPciAddress(device)]
+			availableGPULookup[getPCIAddress(device)] = gpuLookup[getPCIAddress(device)]
 		}
 	}
 
@@ -95,7 +95,7 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 	num := math.MaxInt32
 
 	log.Print("Available GPUs:")
-	for address, assignedNum := range availableGpuLookup {
+	for address, assignedNum := range availableGPULookup {
 		log.Printf("%s: assigned to %d containers", address, assignedNum)
 
 		if num > assignedNum {
