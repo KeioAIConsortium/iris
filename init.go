@@ -38,14 +38,16 @@ func initLxdServer() error {
 }
 
 func initClusterInfo() error {
-	clusterInfo, _, err := lxdServer.GetCluster()
+	c, _, err := lxdServer.GetCluster()
 	if err != nil {
 		return xerrors.Errorf("failed to lxdServer.GetCluster(): %w", err)
 	}
-	if clusterInfo.Enabled {
+	if c.Enabled {
 		log.Print("LXD is running in cluster mode")
 	} else {
 		log.Print("LXD is running in standalone mode")
 	}
+
+	clusterInfo = c
 	return nil
 }
