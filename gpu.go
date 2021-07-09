@@ -14,13 +14,13 @@ type ClusterState struct {
 	locationLookup map[string]string
 }
 
-func makeClusterState(containers []*api.Container) ClusterState {
+func makeClusterState(containers []*api.Container) *ClusterState {
 	locationLookup := map[string]string{}
 	for _, container := range containers {
 		locationLookup[container.Name] = container.Location
 	}
 
-	return ClusterState{
+	return &ClusterState{
 		locationLookup: locationLookup,
 	}
 }
