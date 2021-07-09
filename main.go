@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"regexp"
+	"strings"
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	lxd "github.com/lxc/lxd/client"
@@ -79,7 +79,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 	var managedContainers []*api.Container
 	for _, container := range containers {
-		if regexp.MustCompile("^jupyterhub-singleuser-instance").MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name) {
+		if strings.HasPrefix(container.Name, "jupyterhub-singleuser-instance") && stringSliceContains(managedContainerNames, container.Name) {
 			managedContainers = append(managedContainers, container)
 		}
 	}
