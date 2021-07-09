@@ -25,13 +25,6 @@ func makeClusterState(containers []*api.Container) *ClusterState {
 	}
 }
 
-func (cs *ClusterState) logManagedContainers(server string) {
-	log.Print("Currently managed containers:")
-	for _, containerName := range cs.getManagedContainers(server) {
-		log.Printf("- %s", containerName)
-	}
-}
-
 func (cs *ClusterState) getManagedContainers(server string) []string {
 	var managedContainers []string
 	for k, v := range cs.locationLookup {
