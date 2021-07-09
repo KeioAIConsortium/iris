@@ -91,7 +91,7 @@ func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Devi
 	for _, device := range devices {
 		processes, err := device.GetAllRunningProcesses()
 		if err != nil {
-			log.Fatalln("error:", err.Error())
+			return "", xerrors.Errorf("failed to GetAllRunningProcesses(): %w", err)
 		}
 		if len(processes) == 0 {
 			availableGpuLookup[getPciAddress(device)] = gpuLookup[getPciAddress(device)]
