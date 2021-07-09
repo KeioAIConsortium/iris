@@ -93,7 +93,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	address, err := getAvailableGPUPCIAddress(managedContainers, devices)
+	address, err := getAvailableGPUAddress(managedContainers, devices)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

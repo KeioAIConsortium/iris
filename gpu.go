@@ -39,7 +39,7 @@ func getPCIAddress(device *nvml.Device) string {
 	return strings.ToLower(device.PCI.BusID[4:])
 }
 
-func getAvailableGPUPCIAddress(containers []*api.Container, devices []*nvml.Device) (string, error) {
+func getAvailableGPUAddress(containers []*api.Container, devices []*nvml.Device) (string, error) {
 	gpuLookup := map[string]int{}
 
 	for _, device := range devices {
