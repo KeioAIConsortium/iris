@@ -119,16 +119,16 @@ func main() {
 		}
 	}()
 
-	if err = initGPUDevices(); err != nil {
+	if err := initGPUDevices(); err != nil {
 		log.Printf("failed to initGPUDevices(): %v", err)
 		return
 	}
 
-	if err = initLxdServer(); err != nil {
+	if err := initLxdServer(); err != nil {
 		log.Printf("failed to initLxdServer(): %v", err)
 	}
 
-	if err = initClusterInfo(); err != nil {
+	if err := initClusterInfo(); err != nil {
 		log.Printf("failed to initClusterInfo(): %v", err)
 		return
 	}
@@ -138,15 +138,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
 
-	s := http.Server{
-		Addr:    ":80",
-		Handler: mux,
-	}
-	if err = s.ListenAndServe(); err != nil {
+	if err := http.ListenAndServe(":80", mux); err != nil {
 		log.Printf("failed to http.Server.ListenAndServe(): %v", err)
 		return
 	}
-
-	log.Print("Going to sleep...")
-	select {}
 }
