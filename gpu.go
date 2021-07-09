@@ -46,15 +46,6 @@ func getPciAddress(device *nvml.Device) string {
 	return strings.ToLower(device.PCI.BusID[4:])
 }
 
-func stringSliceContains(s []string, e string) bool {
-	for _, a := range s {
-		if a == e {
-			return true
-		}
-	}
-	return false
-}
-
 func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Device) (string, error) {
 	gpuLookup := map[string]int{}
 
