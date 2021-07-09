@@ -126,6 +126,7 @@ func main() {
 
 	if err := initLxdServer(); err != nil {
 		log.Printf("failed to initLxdServer(): %v", err)
+		return
 	}
 
 	if err := initClusterInfo(); err != nil {
