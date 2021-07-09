@@ -6,6 +6,7 @@ require (
 	github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20200622050622-c34507425bdb
 	github.com/flosch/pongo2 v0.0.0-20200529170236-5abacdfa4915 // indirect
 	github.com/lxc/lxd v0.0.0-20200625220936-4e4162505f75
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
 	gopkg.in/macaroon-bakery.v2 v2.2.0 // indirect
 	gopkg.in/robfig/cron.v2 v2.0.0-20150107220207-be2e0b0deed5 // indirect
 )

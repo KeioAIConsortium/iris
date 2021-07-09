@@ -2,68 +2,65 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
-	"math"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	lxd "github.com/lxc/lxd/client"
 	api "github.com/lxc/lxd/shared/api"
+	"golang.org/x/xerrors"
 )
-
-type Response struct {
-	Pci string `json:"pci"`
-}
 
 var lxdServer lxd.InstanceServer
 var clusterInfo *api.Cluster
 var devices []*nvml.Device
 
-func jsonifyPretty(value interface{}) string {
-	jsonValue, _ := json.Marshal(value)
-	return string(jsonValue)
-}
-
-func getPciAddress(device *nvml.Device) string {
-	return strings.ToLower(device.PCI.BusID[4:])
-}
-
-type ClusterState struct {
-	locationLookup map[string]string
-}
-
-func initClusterState(containers []*api.Container) ClusterState {
-	locationLookup := map[string]string{}
-	for _, container := range containers {
-		locationLookup[container.Name] = container.Location
+func initGPUDevices() error {
+	deviceCount, err := nvml.GetDeviceCount()
+	if err != nil {
+		return xerrors.Errorf("failed to nvml.GetDeviceCount(): %w", err)
 	}
+	log.Printf("Detected %d GPUs.", deviceCount)
 
-	return ClusterState{
-		locationLookup: locationLookup,
-	}
-}
-
-func (cs *ClusterState) logManagedContainers(server string) {
-	log.Println("Currently managed containers:")
-	for _, containerName := range cs.getManagedContainers(server) {
-		log.Println("-", containerName)
-	}
-}
-
-func (cs *ClusterState) getManagedContainers(server string) []string {
-	var managedContainers []string
-	for k, v := range cs.locationLookup {
-		if v == server {
-			managedContainers = append(managedContainers, k)
+	for i := uint(0); i < deviceCount; i++ {
+		device, err := nvml.NewDevice(i)
+		if err != nil {
+			return xerrors.Errorf("failed to nvml.NewDevice(%d): %w", i, err)
 		}
+		log.Printf("GPU %d: %s", i, device.PCI.BusID)
+		devices = append(devices, device)
 	}
-	return managedContainers
+
+	return nil
 }
 
-func stringSliceContains(s []string, e string) bool {
+func initLxdServer() error {
+	lis, err := lxd.ConnectLXDUnix("", nil)
+	if err != nil {
+		return xerrors.Errorf("failed to lxd.ConnectLXDUnix(): %w", err)
+	}
+
+	lxdServer = lis
+	return nil
+}
+
+func initClusterInfo() error {
+	c, _, err := lxdServer.GetCluster()
+	if err != nil {
+		return xerrors.Errorf("failed to lxdServer.GetCluster(): %w", err)
+	}
+	if c.Enabled {
+		log.Print("LXD is running in cluster mode")
+	} else {
+		log.Print("LXD is running in standalone mode")
+	}
+
+	clusterInfo = c
+	return nil
+}
+
+func contains(s []string, e string) bool {
 	for _, a := range s {
 		if a == e {
 			return true
@@ -72,93 +69,11 @@ func stringSliceContains(s []string, e string) bool {
 	return false
 }
 
-func getAvailableGpuPciAddress(containers []*api.Container, devices []*nvml.Device) string {
-	gpuLookup := map[string]int{}
-
-	for _, device := range devices {
-		gpuLookup[getPciAddress(device)] = 0
-	}
-
-	for _, container := range containers {
-		for _, device := range container.ExpandedDevices {
-			deviceType, ok := device["type"]
-			if !ok {
-				log.Fatalf("%s: expected \"type\" for device: %s", container.Name, jsonifyPretty(device))
-			}
-			if deviceType != "gpu" {
-				continue
-			}
-
-			pciAddress, ok := device["pci"]
-			if !ok {
-				// NOTE: there are containers in which no pci address is specified because of previous system specifications
-				// but after starting all containers in the new environment, the problem will be solved
-				continue
-				// log.Fatalf("%s: found invalid gpu device (no pci address specified): %s", container.Name, jsonifyPretty(device))
-			}
-
-			found := false
-			for _, device := range devices {
-				if pciAddress == getPciAddress(device) {
-					found = true
-				}
-			}
-			if !found {
-				log.Fatalf("%s: attached gpu not found: %s", container.Name, jsonifyPretty(device))
-			}
-
-			gpuLookup[pciAddress]++
-
-			log.Println(container.Name, jsonifyPretty(device))
-		}
-	}
-
-	availableGpuLookup := map[string]int{}
-
-	for _, device := range devices {
-		processes, err := device.GetAllRunningProcesses()
-		if err != nil {
-			log.Fatalln("error:", err.Error())
-		}
-		if len(processes) == 0 {
-			availableGpuLookup[getPciAddress(device)] = gpuLookup[getPciAddress(device)]
-		}
-	}
-
-	leastAssignedGPUAddress := ""
-	num := math.MaxInt32
-
-	log.Println("Available GPUs")
-	for address, assignedNum := range availableGpuLookup {
-		log.Println(address, ": ", "assigned to", assignedNum, " containers")
-
-		if num > assignedNum {
-			leastAssignedGPUAddress = address
-			num = assignedNum
-		}
-	}
-
-	// MEMO: assign the gpu whose associated containers' number is the smallest even through the gpu has working processes
-	if leastAssignedGPUAddress == "" {
-		for address, assignedNum := range gpuLookup {
-			if num > assignedNum {
-				leastAssignedGPUAddress = address
-				num = assignedNum
-			}
-		}
-	}
-
-	res := &Response{Pci: leastAssignedGPUAddress}
-
-	return jsonifyPretty(res)
-}
-
-var containerNameReg = regexp.MustCompile("^jupyterhub-singleuser-instance")
-
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	rawContainers, err := lxdServer.GetContainers()
 	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	var containers []*api.Container
@@ -166,76 +81,75 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		containers = append(containers, &rawContainers[i])
 	}
 
-	clusterState := initClusterState(containers)
-	clusterState.logManagedContainers(clusterInfo.ServerName)
-	managedContainerNames :=
-		clusterState.getManagedContainers(clusterInfo.ServerName)
+	clusterState := getClusterState(containers)
+	managedContainerNames := clusterState.getManagedContainers(clusterInfo.ServerName)
+
+	log.Printf("Currently managed containers: %s", strings.Join(managedContainerNames, ", "))
 
 	var managedContainers []*api.Container
 	for _, container := range containers {
-		if containerNameReg.MatchString(container.Name) && stringSliceContains(managedContainerNames, container.Name) {
+		if strings.HasPrefix(container.Name, "jupyterhub-singleuser-instance") && contains(managedContainerNames, container.Name) {
 			managedContainers = append(managedContainers, container)
 		}
 	}
 
-	ret := getAvailableGpuPciAddress(managedContainers, devices)
-
+	address, err := getAvailableGPUAddress(managedContainers, devices)
 	if err != nil {
-		log.Fatalln("error:", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
+
+	type response struct {
+		PCI string `json:"pci"`
+	}
+	res, err := json.Marshal(response{
+		PCI: address,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, ret)
+	w.Write(res) //nolint:errcheck
 }
 
 func main() {
-	log.Println("Initializing NVML...")
+	log.Print("Initializing NVML...")
 	err := nvml.Init()
 	if err != nil {
-		log.Fatalln("NVML error:", err.Error())
+		log.Fatalf("failed to nvml.Init(): %v", err)
 	}
-	defer nvml.Shutdown()
-
-	count, err := nvml.GetDeviceCount()
-	if err != nil {
-		log.Fatalln("Error getting device count:", err.Error())
-	}
-	log.Printf("Detected %d GPUs.\n", count)
-
-	for i := uint(0); i < count; i++ {
-		device, err := nvml.NewDevice(i)
+	defer func() {
+		err := nvml.Shutdown()
 		if err != nil {
-			log.Fatalln("NVML error:", err.Error())
+			log.Fatalf("failed to nvml.Shutdown() successfully: %v", err)
 		}
-		log.Println("GPU ", i, ": ", device.PCI.BusID)
-		devices = append(devices, device)
+	}()
+
+	if err := initGPUDevices(); err != nil {
+		log.Printf("failed to initGPUDevices(): %v", err)
+		return
 	}
 
-	lxdServer, err = lxd.ConnectLXDUnix("", nil)
-	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
+	if err := initLxdServer(); err != nil {
+		log.Printf("failed to initLxdServer(): %v", err)
+		return
 	}
 
-	clusterInfo, _, err = lxdServer.GetCluster()
-	if err != nil {
-		log.Fatalln("LXD error:", err.Error())
-	}
-	if clusterInfo.Enabled {
-		log.Println("LXD is running in cluster mode")
-	} else {
-		log.Println("LXD is running in standalone mode")
+	if err := initClusterInfo(); err != nil {
+		log.Printf("failed to initClusterInfo(): %v", err)
+		return
 	}
 
-	log.Println("Initialization is done")
+	log.Print("Initialization complete.")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
 
-	s := http.Server{
-		Addr:    ":80",
-		Handler: mux,
+	if err := http.ListenAndServe(":80", mux); err != nil {
+		log.Printf("failed to http.Server.ListenAndServe(): %v", err)
+		return
 	}
-	s.ListenAndServe()
-
-	log.Println("Going to sleep...")
-	select {}
 }
