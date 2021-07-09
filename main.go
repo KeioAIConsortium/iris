@@ -81,7 +81,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		containers = append(containers, &rawContainers[i])
 	}
 
-	clusterState := makeClusterState(containers)
+	clusterState := getClusterState(containers)
 	managedContainerNames := clusterState.getManagedContainers(clusterInfo.ServerName)
 
 	log.Printf("Currently managed containers: %s", strings.Join(managedContainerNames, ", "))
