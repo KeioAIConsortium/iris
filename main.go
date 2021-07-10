@@ -29,6 +29,7 @@ type Iris struct {
 func (iris *Iris) GetAvailableGPUAddress(w http.ResponseWriter, r *http.Request) {
 	rawContainers, err := iris.lxdServer.GetContainers()
 	if err != nil {
+		log.Printf("failed to GetContainers(): %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -52,6 +53,7 @@ func (iris *Iris) GetAvailableGPUAddress(w http.ResponseWriter, r *http.Request)
 
 	address, err := getAvailableGPUAddress(managedContainers, iris.devices)
 	if err != nil {
+		log.Printf("failed to getAvailableGPUAddress(): %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -63,6 +65,7 @@ func (iris *Iris) GetAvailableGPUAddress(w http.ResponseWriter, r *http.Request)
 		PCI: address,
 	})
 	if err != nil {
+		log.Printf("failed to json.Marshal(): %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
