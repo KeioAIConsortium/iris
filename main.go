@@ -119,27 +119,27 @@ func main() {
 	log.Print("Initializing NVML...")
 	err := nvml.Init()
 	if err != nil {
-		log.Fatalf("failed to nvml.Init(): %v", err)
+		log.Fatalf("failed to nvml.Init(): %+v", err)
 	}
 	defer func() {
 		err := nvml.Shutdown()
 		if err != nil {
-			log.Fatalf("failed to nvml.Shutdown() successfully: %v", err)
+			log.Fatalf("failed to nvml.Shutdown() successfully: %+v", err)
 		}
 	}()
 
 	if err := initGPUDevices(); err != nil {
-		log.Printf("failed to initGPUDevices(): %v", err)
+		log.Printf("failed to initGPUDevices(): %+v", err)
 		return
 	}
 
 	if err := initLxdServer(); err != nil {
-		log.Printf("failed to initLxdServer(): %v", err)
+		log.Printf("failed to initLxdServer(): %+v", err)
 		return
 	}
 
 	if err := initClusterInfo(); err != nil {
-		log.Printf("failed to initClusterInfo(): %v", err)
+		log.Printf("failed to initClusterInfo(): %+v", err)
 		return
 	}
 
@@ -149,7 +149,7 @@ func main() {
 	mux.HandleFunc("/", rootHandler)
 
 	if err := http.ListenAndServe(":80", mux); err != nil {
-		log.Printf("failed to http.Server.ListenAndServe(): %v", err)
+		log.Printf("failed to http.Server.ListenAndServe(): %+v", err)
 		return
 	}
 }
