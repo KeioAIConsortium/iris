@@ -9,56 +9,7 @@ import (
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	lxd "github.com/lxc/lxd/client"
 	api "github.com/lxc/lxd/shared/api"
-	"golang.org/x/xerrors"
 )
-
-var lxdServer lxd.InstanceServer
-var clusterInfo *api.Cluster
-var devices []*nvml.Device
-
-func initGPUDevices() error {
-	deviceCount, err := nvml.GetDeviceCount()
-	if err != nil {
-		return xerrors.Errorf("failed to nvml.GetDeviceCount(): %w", err)
-	}
-	log.Printf("Detected %d GPUs.", deviceCount)
-
-	for i := uint(0); i < deviceCount; i++ {
-		device, err := nvml.NewDevice(i)
-		if err != nil {
-			return xerrors.Errorf("failed to nvml.NewDevice(%d): %w", i, err)
-		}
-		log.Printf("GPU %d: %s", i, device.PCI.BusID)
-		devices = append(devices, device)
-	}
-
-	return nil
-}
-
-func initLxdServer() error {
-	lis, err := lxd.ConnectLXDUnix("", nil)
-	if err != nil {
-		return xerrors.Errorf("failed to lxd.ConnectLXDUnix(): %w", err)
-	}
-
-	lxdServer = lis
-	return nil
-}
-
-func initClusterInfo() error {
-	c, _, err := lxdServer.GetCluster()
-	if err != nil {
-		return xerrors.Errorf("failed to lxdServer.GetCluster(): %w", err)
-	}
-	if c.Enabled {
-		log.Print("LXD is running in cluster mode")
-	} else {
-		log.Print("LXD is running in standalone mode")
-	}
-
-	clusterInfo = c
-	return nil
-}
 
 func contains(s []string, e string) bool {
 	for _, a := range s {
@@ -69,8 +20,14 @@ func contains(s []string, e string) bool {
 	return false
 }
 
-func rootHandler(w http.ResponseWriter, r *http.Request) {
-	rawContainers, err := lxdServer.GetContainers()
+type Iris struct {
+	lxdServer lxd.InstanceServer
+	cluster   *api.Cluster
+	devices   []*nvml.Device
+}
+
+func (iris *Iris) GetAvailableGPUAddress(w http.ResponseWriter, r *http.Request) {
+	rawContainers, err := iris.lxdServer.GetContainers()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -82,7 +39,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clusterState := getClusterState(containers)
-	managedContainerNames := clusterState.getManagedContainers(clusterInfo.ServerName)
+	managedContainerNames := clusterState.getManagedContainers(iris.cluster.ServerName)
 
 	log.Printf("Currently managed containers: %s", strings.Join(managedContainerNames, ", "))
 
@@ -93,7 +50,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	address, err := getAvailableGPUAddress(managedContainers, devices)
+	address, err := getAvailableGPUAddress(managedContainers, iris.devices)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -128,25 +85,51 @@ func main() {
 		}
 	}()
 
-	if err := initGPUDevices(); err != nil {
-		log.Printf("failed to initGPUDevices(): %v", err)
+	deviceCount, err := nvml.GetDeviceCount()
+	if err != nil {
+		log.Printf("failed to nvml.GetDeviceCount(): %v", err)
+		return
+	}
+	log.Printf("Detected %d GPUs.", deviceCount)
+
+	var devices []*nvml.Device
+	for i := uint(0); i < deviceCount; i++ {
+		device, err := nvml.NewDevice(i)
+		if err != nil {
+			log.Printf("failed to nvml.NewDevice(%d): %v", i, err)
+			return
+		}
+		log.Printf("GPU %d: %s", i, device.PCI.BusID)
+		devices = append(devices, device)
+	}
+
+	lxdServer, err := lxd.ConnectLXDUnix("", nil)
+	if err != nil {
+		log.Printf("failed to lxd.ConnectLXDUnix(): %v", err)
 		return
 	}
 
-	if err := initLxdServer(); err != nil {
-		log.Printf("failed to initLxdServer(): %v", err)
+	cluster, _, err := lxdServer.GetCluster()
+	if err != nil {
+		log.Printf("failed to lxdServer.GetCluster(): %v", err)
 		return
 	}
-
-	if err := initClusterInfo(); err != nil {
-		log.Printf("failed to initClusterInfo(): %v", err)
-		return
+	if cluster.Enabled {
+		log.Print("LXD is running in cluster mode")
+	} else {
+		log.Print("LXD is running in standalone mode")
 	}
 
 	log.Print("Initialization complete.")
 
+	iris := &Iris{
+		lxdServer: lxdServer,
+		cluster:   cluster,
+		devices:   devices,
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", rootHandler)
+	mux.HandleFunc("/", iris.GetAvailableGPUAddress)
 
 	if err := http.ListenAndServe(":80", mux); err != nil {
 		log.Printf("failed to http.Server.ListenAndServe(): %v", err)
