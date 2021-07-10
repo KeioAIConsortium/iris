@@ -72,6 +72,7 @@ func contains(s []string, e string) bool {
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	rawContainers, err := lxdServer.GetContainers()
 	if err != nil {
+		log.Printf("failed to lxdServer.GetContainers(): %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -95,6 +96,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 	address, err := getAvailableGPUAddress(managedContainers, devices)
 	if err != nil {
+		log.Printf("failed to getAvailableGPUAddress(): %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -106,6 +108,7 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		PCI: address,
 	})
 	if err != nil {
+		log.Printf("failed to json.Marshal(): %+v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
